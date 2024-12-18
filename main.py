@@ -239,7 +239,7 @@ class BertSpamClassifier(nn.Module):
 
 def bert_exp(x_train, x_test, y_train, y_test):
 
-    def train_model(model, train_loader, optimizer, criterion, epochs=40, save_model=True):
+    def train_model(model, train_loader, optimizer, criterion, epochs=10, save_model=True):
         if os.path.exists('./models/bert_model.pth'):
             try:
                 model = torch.load('./models/bert_model.pth')
@@ -457,7 +457,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw_data_path", type=str, default=None)
     parser.add_argument("--process_data_path", type=str, default=None)
-    parser.add_argument("--model_list", type=str, default='models need to use')
+    parser.add_argument("--model_list", type=str, help='models need to use')
     parser.add_argument("--predict_bool", action='store_true', help="Enable prediction for new email")
     parser.add_argument("--visual_data", type=str, default='./visual_data.txt')
     parser.add_argument("--test_dataset", action='store_true', help="if use ECE_449_dataset for model evaluation")
