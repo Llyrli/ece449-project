@@ -178,7 +178,7 @@ def mlp_exp(x_train, x_test, y_train, y_test):
     y_test = torch.tensor(y_test, dtype=torch.long)
 
     # reduce data size for faster training
-    miner = 100
+    miner = 50
     x_train = x_train[: int(x_train.shape[0]/miner), :]
     y_train = y_train[: int(y_train.shape[0]/miner)]
     x_test = x_test[: int(x_test.shape[0]/miner), :]
@@ -197,7 +197,7 @@ def mlp_exp(x_train, x_test, y_train, y_test):
     model = SpamClassifier(input_size, hidden_size, output_size)
     criterion = nn.CrossEntropyLoss() 
     optimizer = optim.Adam(model.parameters(), lr=0.01)
-    model = train_model(model, train_loader, criterion, optimizer, epochs=10)
+    model = train_model(model, train_loader, criterion, optimizer, epochs=20)
 
     # evaluate model
     accuracy = evaluate_model(model, test_loader, criterion)
@@ -239,7 +239,7 @@ class BertSpamClassifier(nn.Module):
 
 def bert_exp(x_train, x_test, y_train, y_test):
 
-    def train_model(model, train_loader, optimizer, criterion, epochs=10, save_model=True):
+    def train_model(model, train_loader, optimizer, criterion, epochs=40, save_model=True):
         if os.path.exists('./models/bert_model.pth'):
             try:
                 model = torch.load('./models/bert_model.pth')
@@ -300,10 +300,11 @@ def bert_exp(x_train, x_test, y_train, y_test):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     # sparse-matrix to pytorch tensor
-    x_train = x_train[: int(len(x_train)/100)]
-    y_train = y_train[: int(len(y_train)/100)]
-    x_test = x_test[: int(len(x_test)/100)]
-    y_test = y_test[: int(len(y_test)/100)]
+    miner = 100
+    x_train = x_train[: int(len(x_train)/miner)]
+    y_train = y_train[: int(len(y_train)/miner)]
+    x_test = x_test[: int(len(x_test)/miner)]
+    y_test = y_test[: int(len(y_test)/miner)]
     
     train_dataset = SpamDataset(x_train, y_train, tokenizer)
     test_dataset = SpamDataset(x_test, y_test, tokenizer)
@@ -340,7 +341,63 @@ def plot_accuracy(accuracy_x, accuracy_y):
     plt.show()
 
 
-def main(raw_data_path, process_data_path, model_list, predict_bool, visual_data, plot=True):
+def read_test_files(data_path):
+    ham_path = os.path.join(data_path, 'ham')
+    spam_path = os.path.join(data_path, 'spam')
+    ham_list = []
+    spam_list = []
+    for file in os.listdir(ham_path):
+        with open(os.path.join(ham_path, file), 'r', encoding='utf-8', errors='ignore') as f:
+            ham_list.append(f.read())
+    for file in os.listdir(spam_path):
+        with open(os.path.join(spam_path, file), 'r', encoding='utf-8', errors='ignore') as f:
+            spam_list.append(f.read())
+    return ham_list, spam_list
+
+
+def classify_dataset(model_name, vectorizer, classifier, ham_list, spam_list, tokenizer_=None):
+    ham_dict = {}
+    for ham in ham_list:
+        if tokenizer_ is None:
+            email_sample = vectorizer.transform([ham])
+        else:
+            email_dataset = SpamDataset([ham], [2], tokenizer_)
+            email_samples = DataLoader(email_dataset, batch_size=1, shuffle=False)
+            email_sample = None
+            for sample in email_samples:
+                email_sample = sample
+        prediction = classifier.predict(email_sample)
+        ham_dict[ham] = "Spam" if prediction[0] == 1 else "Ham"
+    spam_dict = {}
+    for spam in spam_list:
+        if tokenizer_ is None:
+            email_sample = vectorizer.transform([spam])
+        else:
+            email_dataset = SpamDataset([spam], [2], tokenizer_)
+            email_samples = DataLoader(email_dataset, batch_size=1, shuffle=False)
+            email_sample = None
+            for sample in email_samples:
+                email_sample = sample
+        prediction = classifier.predict(email_sample)
+        spam_dict[spam] = "Spam" if prediction[0] == 1 else "Ham"
+
+    import json
+    ham_json_file_path = os.path.join('./results', f"{model_name}-ham_predictions.json")
+    with open(ham_json_file_path, "w") as ham_json_file:
+        json.dump(ham_dict, ham_json_file, indent=4)
+
+    # Save spam_dict to a separate JSON file
+    spam_json_file_path = os.path.join('./results', f"{model_name}-spam_predictions.json")
+    with open(spam_json_file_path, "w") as spam_json_file:
+        json.dump(spam_dict, spam_json_file, indent=4)
+
+    print(f"Ham predictions saved to {ham_json_file_path}")
+    print(f"Spam predictions saved to {spam_json_file_path}")
+    
+    return 
+
+
+def main(raw_data_path, process_data_path, model_list, predict_bool, visual_data, test_dataset, test_dataset_path, plot=True):
     # get model
     if not os.path.exists(process_data_path):
         x_train, x_test, y_train, y_test, vectorizer = dataloader(raw_data_path, process_data_path)
@@ -378,6 +435,12 @@ def main(raw_data_path, process_data_path, model_list, predict_bool, visual_data
                         else:
                             result = classify_new_email(vectorizer, classifier, line.strip())
                         print(f"Prediction: {result}")
+            if test_dataset:
+                ham_list, spam_list = read_test_files(test_dataset_path)
+                if model_name == 'bert':
+                    classify_dataset(model_name, vectorizer, classifier, ham_list, spam_list, tokenizer)
+                else:
+                    classify_dataset(model_name, vectorizer, classifier, ham_list, spam_list)
         else:
             print(f"Model {model_name} not found in model_dict")
 
@@ -397,6 +460,8 @@ if __name__ == "__main__":
     parser.add_argument("--model_list", type=str, default='models need to use')
     parser.add_argument("--predict_bool", action='store_true', help="Enable prediction for new email")
     parser.add_argument("--visual_data", type=str, default='./visual_data.txt')
+    parser.add_argument("--test_dataset", action='store_true', help="if use ECE_449_dataset for model evaluation")
+    parser.add_argument("--test_dataset_path", type=str, default=None)
     args = parser.parse_args()
     
     raw_data_path = args.raw_data_path 
@@ -404,6 +469,8 @@ if __name__ == "__main__":
     model_list = args.model_list
     predict_bool = args.predict_bool
     visual_data = args.visual_data
+    test_dataset = args.test_dataset
+    test_dataset_path = args.test_dataset_path
 
-    main(raw_data_path, process_data_path, model_list, predict_bool, visual_data)
+    main(raw_data_path, process_data_path, model_list, predict_bool, visual_data, test_dataset, test_dataset_path)
 
